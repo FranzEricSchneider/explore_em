@@ -17,13 +17,12 @@ def generate_observations(
     n_observers=20,
     xy_bounds=(0, 10),
     std=np.deg2rad(10),
-    sight_bounds=(1, 3),
+    sight_bounds=None,
 ):
     """
     Generate N samples of data for a number of observers viewing a number of
     bodies.
 
-    TODO: Add in the idea of sight limits
     TODO: Add in the idea of false positives and false negatives
     """
 
@@ -37,20 +36,30 @@ def generate_observations(
 
     for i, observer in enumerate(observers):
         for j, body in enumerate(bodies):
-            observer_ids.append(i)
-            labels.append(j)
 
             # Measure the angle as a unit vector, keep if it is within sight range
             vector = body - observer
             length = np.linalg.norm(vector)
-            if length < sight_bounds[0] or length > sight_bounds[1]:
+            if sight_bounds is not None and (
+                length < sight_bounds[0] or length > sight_bounds[1]
+            ):
                 continue
             unit_vector = vector / length
 
             # Then add measurement noise
-            observed_angles.append(
-                rotate(unit_vector, np.random.normal(loc=0, scale=std))
-            )
+            noisy = rotate(unit_vector, np.random.normal(loc=0, scale=std))
+
+            if sight_bounds is None:
+                observed_angles.append(noisy)
+            else:
+                observed_angles.append(
+                    [
+                        sight_bounds[0] * noisy,
+                        sight_bounds[1] * noisy,
+                    ]
+                )
+            observer_ids.append(i)
+            labels.append(j)
 
     return (
         bodies,
@@ -61,8 +70,20 @@ def generate_observations(
     )
 
 
+def check_if_ray(observations):
+    """Check whether we're dealing with rays or segments."""
+    return len(observations.shape) == 2
+
+
 def draw_sightings(
-    axis, observers, observations, colors, kappa, scales=(0,), styles=("-",), length=100
+    axis,
+    observers,
+    observations,
+    colors,
+    kappa,
+    scales=(0,),
+    styles=("-",),
+    ray_length=100,
 ):
 
     kwargs = {"color": colors, "angles": "xy", "scale_units": "xy", "scale": 1}
@@ -70,22 +91,41 @@ def draw_sightings(
     def xy(matrix):
         return (matrix[:, 0], matrix[:, 1])
 
-    axis.quiver(*xy(observers), *xy(observations), **kwargs)
+    ray = check_if_ray(observations)
+    if ray:
+        axis.quiver(*xy(observers), *xy(observations), **kwargs)
 
     # Approximately equal
     stddev = np.sqrt(1 / kappa)
 
     for scale, style in zip(scales, styles):
-        for (x0, y0), (dx, dy), color in zip(observers, observations, colors):
+        for (x0, y0), observation, color in zip(observers, observations, colors):
             kwargs = {"linestyle": style, "color": color, "linewidth": 1, "alpha": 0.2}
             if np.isclose(scale, 0):
-                axis.plot([x0, x0 + length * dx], [y0, y0 + length * dy], **kwargs)
+                if ray:
+                    dx, dy = observation
+                    axis.plot(
+                        [x0, x0 + ray_length * dx], [y0, y0 + ray_length * dy], **kwargs
+                    )
+                else:
+                    _, (dx1, dy1) = observation
+                    axis.plot([x0, x0 + dx1], [y0, y0 + dy1], **kwargs)
+
             else:
                 for angle in [scale * stddev, -scale * stddev]:
-                    rdx, rdy = rotate(np.array([dx, dy]), angle)
-                    axis.plot(
-                        [x0, x0 + length * rdx], [y0, y0 + length * rdy], **kwargs
-                    )
+                    if ray:
+                        rdx, rdy = rotate(observation, angle)
+                        axis.plot(
+                            [x0, x0 + ray_length * rdx],
+                            [y0, y0 + ray_length * rdy],
+                            **kwargs
+                        )
+                    else:
+                        rdx0, rdy0 = rotate(observation[0], angle)
+                        rdx1, rdy1 = rotate(observation[1], angle)
+                        axis.plot(
+                            [x0 + rdx0, x0 + rdx1], [y0 + rdy0, y0 + rdy1], **kwargs
+                        )
 
 
 def visualize_observations(
@@ -135,11 +175,18 @@ def visualize_observations(
 
 def visualize_weights(axis, observer, observation, weights, bodies, cmap_name="tab10"):
 
+    is_ray = observation.shape == (2,)
+    if is_ray:
+        unit_vector = observation
+    else:
+        vector = observation[1] - observation[0]
+        unit_vector = vector / np.linalg.norm(vector)
+
     axis.quiver(
         observer[0],
         observer[1],
-        observation[0],  # dx
-        observation[1],  # dy
+        unit_vector[0],  # dx
+        unit_vector[1],  # dy
         angles="xy",
         scale_units="xy",
         scale=1,
@@ -147,7 +194,7 @@ def visualize_weights(axis, observer, observation, weights, bodies, cmap_name="t
 
     cmap = plt.get_cmap(cmap_name, len(bodies))
     for j, (weight, body) in enumerate(zip(weights, bodies)):
-        ox, oy = observer + observation
+        ox, oy = observer + unit_vector
         bx, by = body
         axis.plot([ox, bx], [oy, by], color=cmap(j), linewidth=max(10 * weight, 0.2))
 
@@ -195,15 +242,26 @@ def ray_likelihood(observer, ray, body, kappa):
     return von_mises_C(kappa) * np.exp(kappa * np.dot(unit_vector, ray))
 
 
+def segment_likelihood(observer, segment, body, kappa):
+    """Von Mises probability for direction from observer to body."""
+    raise NotImplementedError()
+
+
 def e_step(K, mu, psi, kappa, observers, observer_ids, observations):
 
     # i x j, aka len(observations) x len(sources)
     e_weights = np.zeros((len(observations), K))
 
+    # Check for ray vs. segment
+    if check_if_ray(observations):
+        likelihood = ray_likelihood
+    else:
+        likelihood = segment_likelihood
+
     # First build the numerators
     for i in range(len(observations)):
         for j in range(K):
-            e_weights[i, j] = psi[j] * ray_likelihood(
+            e_weights[i, j] = psi[j] * likelihood(
                 observers[observer_ids[i]],
                 observations[i],
                 mu[j],
@@ -224,6 +282,12 @@ def m_step(
     # Average the weights over the observations
     psi_new = np.sum(weights, axis=0) / len(weights)
 
+    # Check for ray vs. segment
+    if check_if_ray(observations):
+        likelihood = ray_likelihood
+    else:
+        likelihood = segment_likelihood
+
     # For each source, minimize the negative log likelihood of the related parameters
     mu_new = []
     costs = []
@@ -235,7 +299,7 @@ def m_step(
             sumval = 0
             for i, weight in enumerate(weights[:, j]):
                 if weight > epsilon:
-                    value = ray_likelihood(
+                    value = likelihood(
                         observer=observers[observer_ids[i]],
                         ray=observations[i],
                         body=x,
