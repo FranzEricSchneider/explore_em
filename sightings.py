@@ -200,6 +200,7 @@ def m_step(
 
     # For each source, minimize the negative log likelihood of the related parameters
     mu_new = []
+    costs = []
     for j in range(weights.shape[1]):
 
         # Annoyingly, I think this needs to be defined in situ so it can take only
@@ -220,5 +221,6 @@ def m_step(
 
         result = minimize(neg_log_likelihood, mu_old[j], method="BFGS")
         mu_new.append(result.x)
+        costs.append(result.fun)
 
-    return np.array(mu_new), np.array(psi_new)
+    return np.array(mu_new), np.array(psi_new), np.sum(costs)

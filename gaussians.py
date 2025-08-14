@@ -178,6 +178,7 @@ def m_step(observations, weights, mu_old, sigma_old, psi_old, epsilon=1e-6):
     # For each source, minimize the negative log likelihood of the related parameters
     mu_new = []
     sigma_new = []
+    costs = []
     dim = len(mu_old[0])
     for j in range(weights.shape[1]):
 
@@ -197,5 +198,6 @@ def m_step(observations, weights, mu_old, sigma_old, psi_old, epsilon=1e-6):
         )
         mu_new.append(result.x[:dim])
         sigma_new.append(result.x[dim:])
+        costs.append(result.fun)
 
-    return np.array(mu_new), np.array(sigma_new), np.array(psi_new)
+    return np.array(mu_new), np.array(sigma_new), np.array(psi_new), np.sum(costs)
