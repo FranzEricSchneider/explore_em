@@ -61,6 +61,33 @@ def generate_observations(
     )
 
 
+def draw_sightings(
+    axis, observers, observations, colors, kappa, scales=(0,), styles=("-",), length=100
+):
+
+    kwargs = {"color": colors, "angles": "xy", "scale_units": "xy", "scale": 1}
+
+    def xy(matrix):
+        return (matrix[:, 0], matrix[:, 1])
+
+    axis.quiver(*xy(observers), *xy(observations), **kwargs)
+
+    # Approximately equal
+    stddev = np.sqrt(1 / kappa)
+
+    for scale, style in zip(scales, styles):
+        for (x0, y0), (dx, dy), color in zip(observers, observations, colors):
+            kwargs = {"linestyle": style, "color": color, "linewidth": 1, "alpha": 0.2}
+            if np.isclose(scale, 0):
+                axis.plot([x0, x0 + length * dx], [y0, y0 + length * dy], **kwargs)
+            else:
+                for angle in [scale * stddev, -scale * stddev]:
+                    rdx, rdy = rotate(np.array([dx, dy]), angle)
+                    axis.plot(
+                        [x0, x0 + length * rdx], [y0, y0 + length * rdy], **kwargs
+                    )
+
+
 def visualize_observations(
     axis,
     observers=None,
@@ -68,6 +95,7 @@ def visualize_observations(
     observations=None,
     labels=None,
     bodies=None,
+    kappa=1000,
     cmap_name="tab10",
     bodysize=40,
 ):
@@ -85,21 +113,20 @@ def visualize_observations(
     if observers is not None and observer_ids is not None and observations is not None:
 
         if labels is None:
-            colors = "black"
+            colors = [(0, 0, 0, 1)] * len(observations)
         else:
             unique = np.unique(labels)
             cmap = plt.get_cmap(cmap_name, len(unique))
             colors = [cmap(i) for i in labels]
 
-        axis.quiver(
-            observers[observer_ids][:, 0],
-            observers[observer_ids][:, 1],
-            observations[:, 0],  # dx
-            observations[:, 1],  # dy
-            color=colors,
-            angles="xy",
-            scale_units="xy",
-            scale=1,
+        draw_sightings(
+            axis,
+            observers[observer_ids],
+            observations,
+            colors,
+            kappa=kappa,
+            scales=[0, 1],
+            styles=["-", "--"],
         )
 
     if observers is not None:
@@ -128,7 +155,7 @@ def visualize_weights(axis, observer, observation, weights, bodies, cmap_name="t
 
 
 def visualize_assignments(
-    axis, weights, observers, observer_ids, observations, cmap_name="tab10"
+    axis, weights, observers, observer_ids, observations, kappa, cmap_name="tab10"
 ):
 
     if observations.shape[1] == 1:
@@ -141,15 +168,14 @@ def visualize_assignments(
     for o_weight in weights:
         colors.append(cmap(np.argmax(o_weight)))
 
-    axis.quiver(
-        observers[observer_ids][:, 0],
-        observers[observer_ids][:, 1],
-        observations[:, 0],  # dx
-        observations[:, 1],  # dy
-        color=colors,
-        angles="xy",
-        scale_units="xy",
-        scale=1,
+    draw_sightings(
+        axis,
+        observers[observer_ids],
+        observations,
+        colors,
+        kappa=kappa,
+        scales=[0, 1],
+        styles=["-", "--"],
     )
 
     axis.scatter(observers[:, 0], observers[:, 1], color="k")
