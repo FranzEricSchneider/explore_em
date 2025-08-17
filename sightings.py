@@ -237,7 +237,11 @@ def visualize_pts_as_heatmap(figure, axis, points, magnitudes):
 
 def von_mises_C(kappa):
     """
-    TODO
+    We have defined C as the constant denominator in the von Mises equation
+
+    https://en.wikipedia.org/wiki/Von_Mises_distribution#Definition
+        "i0(κ) is the modified Bessel function of the first kind of order 0, with
+        this scaling constant chosen so that the distribution sums to unity"
     """
     return 1.0 / (2 * np.pi * i0(kappa))
 
@@ -254,7 +258,11 @@ def segment_likelihood(observer, segment, body, kappa):
     Von Mises probability for direction from observer to body, with cutoffs
     at the segment lengths.
 
-    TODO: Explain exponential
+    The exponential die-off is a bit hacky, but is at least continuous. We would
+    like the likelihood of a measurement to be the angular error within the segment
+    length, and then die off from that value beyond the ends of the segment.
+    Using an exponential ensures that the value descreases into infinity, is never
+    less than zero, and is also equal at the boundary.
     """
     ray = (segment[1] - segment[0]) / np.linalg.norm(segment[1] - segment[0])
     angular_likelihood = ray_likelihood(observer, ray, body, kappa)
