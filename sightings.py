@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.interpolate import griddata
 from scipy.optimize import minimize
 from scipy.special import i0  # Bessel function for Von Mises error
 
@@ -207,7 +208,7 @@ def visualize_assignments(
 
     if observations.shape[1] == 1:
         observations = np.hstack([observations, np.zeros_like(observations)])
-    elif len(observations.shape) != 2 or observations.shape[1] != 2:
+    elif len(observations.shape) < 2 or observations.shape[1] != 2:
         raise NotImplementedError(observations.shape)
 
     cmap = plt.get_cmap(cmap_name, weights.shape[1])
@@ -228,6 +229,12 @@ def visualize_assignments(
     axis.scatter(observers[:, 0], observers[:, 1], color="k")
 
 
+def visualize_pts_as_heatmap(figure, axis, points, magnitudes):
+    colors = axis.scatter(points[:, 0], points[:, 1], c=magnitudes, s=20)
+    cbar = figure.colorbar(colors, ax=axis)
+    cbar.set_label("likelihood")
+
+
 def von_mises_C(kappa):
     """
     TODO
@@ -243,8 +250,28 @@ def ray_likelihood(observer, ray, body, kappa):
 
 
 def segment_likelihood(observer, segment, body, kappa):
-    """Von Mises probability for direction from observer to body."""
-    raise NotImplementedError()
+    """
+    Von Mises probability for direction from observer to body, with cutoffs
+    at the segment lengths.
+
+    TODO: Explain exponential
+    """
+    ray = (segment[1] - segment[0]) / np.linalg.norm(segment[1] - segment[0])
+    angular_likelihood = ray_likelihood(observer, ray, body, kappa)
+
+    s0_norm = np.linalg.norm(segment[0])
+    s1_norm = np.linalg.norm(segment[1])
+
+    bvector = body - observer
+    b_norm = np.linalg.norm(bvector)
+    if b_norm < s0_norm:
+        dx = s0_norm - b_norm
+        return angular_likelihood * np.exp(-dx)
+    elif b_norm > s1_norm:
+        dx = b_norm - s1_norm
+        return angular_likelihood * np.exp(-dx)
+    else:
+        return angular_likelihood
 
 
 def e_step(K, mu, psi, kappa, observers, observer_ids, observations):
@@ -300,10 +327,10 @@ def m_step(
             for i, weight in enumerate(weights[:, j]):
                 if weight > epsilon:
                     value = likelihood(
-                        observer=observers[observer_ids[i]],
-                        ray=observations[i],
-                        body=x,
-                        kappa=kappa,
+                        observers[observer_ids[i]],
+                        observations[i],
+                        x,
+                        kappa,
                     )
                     # Make sure the value has a minimum to avoid invalid log calls
                     sumval += weight * np.log(np.clip(value, 1e-200, None))
